@@ -1,0 +1,36 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: mvn 
+spec:
+  workspaces:
+    - name: source
+      description: The workspace for the Git repo
+    - name: maven-repo 
+      description: The workspace for the persistent maven caching
+  params:
+    - name: MAVEN_IMAGE
+      type: string
+      description: Maven base image
+      default: "maven:3.8.4-jdk-8"
+    - name: GOALS
+      description: maven goals to run
+      type: array
+      default:
+        - "package"
+    - name: CONTEXT_DIR
+      type: string
+      description: >-
+        The context directory within the repository for sources on
+        which we want to execute maven goals.
+      default: "."
+  steps:    
+    - name: mvn-goals
+      image: $(params.MAVEN_IMAGE)
+      workingDir: $(workspaces.source.path)/$(params.CONTEXT_DIR)
+      command: ["/usr/bin/mvn"]
+      args:
+        - -s
+        - $(workspaces.maven-settings.path)/mvn/settings.xml
+        - -Dmaven.repo.local=$(workspaces.maven-repo.path)
+        - "$(params.GOALS)"

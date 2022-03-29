@@ -1,0 +1,99 @@
+apiVersion: template.openshift.io/v1
+kind: Template
+metadata:
+  name: pipelinerun-template
+  annotations: 
+    description: "A template that holds a pipelinerun to be processed with parameters"
+objects:
+- apiVersion: triggers.tekton.dev/v1alpha1
+  kind: TriggerTemplate
+  metadata:
+    name: pipeline-template 
+    namespace: ${NAMESPACE}    
+  spec:
+    params:
+    - name: git-url
+      description: The git repository url
+    - name: git-revision
+      description: The git revision
+      default: master
+    resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: pipeline-run-
+        namespace: ${NAMESPACE}
+      spec:
+        serviceAccountName: ${SERVICE_ACCOUNT_NAME}
+        pipelineRef:
+          name: build-pipeline
+        params:
+        - name: git-url
+          value: $(tt.params.git-repo-url)
+        - name: git-revision
+          value: $(tt.params.git-revision)      
+        workspaces:
+        - name: local-maven-repo 
+          persistentVolumeClaim:
+            claimName: maven-repo-pvc
+        - name: containers-cache 
+          emptyDir: {}
+        - name: git-cloned-source    
+          volumeClaimTemplate:
+            metadata:
+              name: git-cloned-source-pvc
+            spec:
+              accessModes:
+                - ReadWriteMany
+              resources:
+                requests:
+                  storage: 10Gi
+    - apiVersion: triggers.tekton.dev/v1alpha1 
+      kind: TriggerBinding 
+      metadata: 
+        name: pipeline-binding 
+        namespace: ${NAMESPACE} 
+      spec: 
+        params: 
+          - name: git-revision 
+            value: $(body.object_attributes.source_branch)
+          - name: git-url 
+            value: gitlab.com/chrismathew/$(body.object_attributes.source.path_with_namespace).git  
+    - apiVersion: triggers.tekton.dev/v1alpha1 
+      kind: EventListener  
+      metadata: 
+        name: ${EVENT_LISTENER_NAME} 
+        namespace: ${NAMESPACE} 
+      spec:   
+        serviceAccountName: ${SERVICE_ACCOUNT_NAME} 
+        triggers: 
+          - name: trigger 
+            interceptors: 
+              - gitlab: 
+                  eventTypes: ["Merge Request Hook"]
+            bindings: 
+            - ref: pipeline-binding 
+            template: 
+              ref: pipeline-template 
+    - apiVersion: route.openshift.io/v1 
+      kind: Route 
+      metadata: 
+        labels: 
+          eventlistener: el-${EVENT_LISTENER_NAME}
+        name: el-${EVENT_LISTENER_NAME} 
+      spec: 
+        port: 
+          targetPort: http-listener 
+        to: 
+          kind: Service 
+          name: el-${EVENT_LISTENER_NAME} 
+parameters: 
+- name: SERVICE_ACCOUNT_NAME 
+  description: "The service account manager triggers" 
+  value: test-tekton-trigger
+- name: NAMESPACE 
+  description: "The namespace to host the triggers" 
+  value: test-tekton
+- name: EVENT_LISTENER_NAME 
+  description: "Reference name for the event listener " 
+  value: mr-event-listener     
